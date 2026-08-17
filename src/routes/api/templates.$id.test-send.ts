@@ -54,13 +54,14 @@ export const Route = createFileRoute("/api/templates/$id/test-send")({
         // Prefer the real contact record so merge tags render exactly as a
         // live send would. Fall back to a sample contact only if unknown.
         const previewEmail = (body as any)?.preview_email || to;
-        const contactRows = await sql`
-          SELECT name, email, phone, company, award_category
+        const contactRows = await sql<any[]>`
+          SELECT first_name, last_name, email, phone, company, award_category
           FROM contacts WHERE lower(email) = lower(${previewEmail}) LIMIT 1`;
         const contact = contactRows[0] || null;
+        const { contactName } = await import("@/lib/merge-tags");
         const tags = buildMergeTags(
           {
-            name: (body as any)?.name ?? contact?.name ?? "Friend",
+            name: (body as any)?.name ?? (contact ? contactName(contact, "Friend") : "Friend"),
             email: to,
             phone: contact?.phone ?? "+234 000 000 0000",
             company: contact?.company ?? "Acme Co.",
@@ -69,6 +70,7 @@ export const Route = createFileRoute("/api/templates/$id/test-send")({
               contact?.award_category ??
               "AfriSAFE HSE Manager of the Year Award",
           },
+
           { campaign_name: tpl.name },
         );
         const apply = (s: string) => applyMergeTags(s, tags);
