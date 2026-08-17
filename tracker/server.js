@@ -138,10 +138,12 @@ async function unsubPost(req, res) {
               status = 'unsubscribed'
           WHERE id = ${contact_id}`;
 
-  await s`INSERT INTO suppressions (email, reason, source, contact_id, campaign_id, details)
-          VALUES (${email.toLowerCase()}, 'unsubscribe', 'unsubscribe_link', ${contact_id},
-                  ${campaign_id}, ${s.json({ token })})
-          ON CONFLICT (email) DO NOTHING`;
+  await s`INSERT INTO suppressed_emails (email, reason, source, campaign_id, contact_id, details)
+          VALUES (${email.toLowerCase()}, 'unsubscribe', 'unsubscribe_link', ${campaign_id},
+                  ${contact_id}, ${s.json({ token })})
+          ON CONFLICT (email) DO UPDATE SET
+            reason = EXCLUDED.reason,
+            source = EXCLUDED.source`;
 
   if (campaign_id) {
     await s`INSERT INTO campaign_events (campaign_id, event_type, metadata)
