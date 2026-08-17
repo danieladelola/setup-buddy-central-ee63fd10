@@ -28,12 +28,30 @@ export const Route = createFileRoute("/api/campaigns/$id/test")({
         const c = rows[0];
         if (!c) return json({ error: "Campaign not found" }, 404);
 
-        // Same personalization path as the queue worker — open pixel, click
-        // rewrite, and unsubscribe footer all present even on test sends.
+        // Same personalization path as the queue worker — merge tags, open
+        // pixel, click rewrite, and unsubscribe footer all present on tests.
+        const { buildMergeTags, applyMergeTags, contactName } = await import("@/lib/merge-tags");
+        const contactRows = await sql<any[]>`
+          SELECT first_name, last_name, email, phone, company, award_category
+          FROM contacts WHERE lower(email) = lower(${email}) LIMIT 1`;
+        const contact = contactRows[0] || null;
+        const tags = buildMergeTags({
+          first_name: contact?.first_name ?? null,
+          last_name: contact?.last_name ?? null,
+          name: contact ? contactName(contact, "Friend") : "Friend",
+          email,
+          phone: contact?.phone ?? "",
+          company: contact?.company ?? "",
+          award_category:
+            (body as any)?.award_category ??
+            contact?.award_category ??
+            "AfriSAFE HSE Manager of the Year Award",
+        });
+
         const appUrl = (process.env.APP_URL || new URL(request.url).origin).replace(/\/$/, "");
         const queueId = crypto.randomUUID();
         const unsubToken = crypto.randomBytes(24).toString("hex");
-        const html = personalizeHtml(c.html_body || "", {
+        const html = personalizeHtml(applyMergeTags(c.html_body || "", tags), {
           queueId,
           campaignId: c.id,
           appUrl,
@@ -46,10 +64,11 @@ export const Route = createFileRoute("/api/campaigns/$id/test")({
             fromEmail: c.from_email,
             fromName: c.from_name,
             replyTo: c.reply_to || (await import("@/lib/email-defaults")).DEFAULT_REPLY_TO,
-            subject: `[TEST] ${c.subject}`,
+            subject: `[TEST] ${applyMergeTags(c.subject || "", tags)}`,
             html,
-            text: c.text_body,
+            text: applyMergeTags(c.text_body || "", tags) || c.text_body,
           });
+
           return json({ ok: true, message_id: id, provider });
         } catch (e: any) {
           console.error("Campaign test send failed", e);
