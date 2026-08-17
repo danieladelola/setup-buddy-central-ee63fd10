@@ -80,35 +80,36 @@ If your existing site uses Apache instead of nginx, the equivalent vhost is a
 
 ## Validating with a real token from the 96 sent emails
 
-1. Pull a real click token that was mailed out (run against the app database):
+The click token is a deterministic HMAC of `{q: queueId, c: campaignId, u: destinationUrl}`,
+so the exact token that went out in an email can be reproduced locally from the
+queue row — no need to dig through inboxes (though copying a button link out of a
+delivered email works too and is the strongest proof).
+
+1. Get a real queue id from the sent campaign:
 
 ```sql
-SELECT id FROM email_queue
+SELECT id, contact_id, status FROM email_queue
 WHERE campaign_id = '4c4fa32e-a111-4982-b91b-15f451d38a27'
   AND status IN ('sent','delivered','opened','clicked')
 LIMIT 1;
 ```
 
-   The mailed HTML is stored per queue row; the fastest source of a real token
-   is the rendered body of a sent row:
+2. Reproduce the mailed token (run from the tracker directory, with
+   `TRACKING_SECRET` set to the same value used at send time):
 
-```sql
-SELECT substring(rendered_html from '/api/track/click/([A-Za-z0-9_.-]+)')
-FROM email_queue
-WHERE campaign_id = '4c4fa32e-a111-4982-b91b-15f451d38a27'
-  AND rendered_html LIKE '%/api/track/click/%'
-LIMIT 1;
+```bash
+TRACKING_SECRET=... node -e "import('./tracking.js').then(({signPayload})=>console.log(signPayload({q:'<QUEUE_ID>',c:'4c4fa32e-a111-4982-b91b-15f451d38a27',u:'https://forms.gle/mZp7ov3MHfaVuGce8'})))"
 ```
 
-   (Or simply copy a button link out of one of the delivered emails.)
+   This prints the identical token string that appears in that recipient's email.
 
-2. Verify locally first (no DNS/SSL involved):
+3. Verify locally first (no DNS/SSL involved):
 
 ```bash
 curl -sSI "http://127.0.0.1:8090/api/track/click/<TOKEN>"
 ```
 
-3. Then through the public hostname:
+4. Then through the public hostname:
 
 ```bash
 curl -sSI "https://mail.afrisafe.org/api/track/click/<TOKEN>"
@@ -121,8 +122,8 @@ curl -sSI "https://mail.afrisafe.org/api/track/click/<TOKEN>"
   `https://forms.gle/mZp7ov3MHfaVuGce8` or the Google Drive `/view` URL
 - No `400 Invalid link` — that would mean the secret differs from the one used
   at send time
-- `SELECT clicked_at, status FROM email_queue WHERE id = '<q from token>'` shows
-  the click was recorded, and a `click` row appears in `campaign_events`
+- `SELECT clicked_at, status FROM email_queue WHERE id = '<QUEUE_ID>'` shows the
+  click recorded, and a `click` row appears in `campaign_events`
 
 Also confirm the open pixel: `curl -sSI https://mail.afrisafe.org/api/track/open/<TOKEN>`
 returns `200` with `Content-Type: image/gif`.
